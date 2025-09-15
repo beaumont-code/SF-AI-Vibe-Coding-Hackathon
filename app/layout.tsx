@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import "@calcom/atoms/globals.min.css";
 import { AuthProvider } from "./contexts/AuthContext";
-import CalProviderWrapper from "./contexts/CalProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,13 +25,28 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <script dangerouslySetInnerHTML={{
+          __html: `
+            // Disable Firebase auto-config detection
+            window.__FIREBASE_DEFAULTS__ = {
+              config: {
+                apiKey: "${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}",
+                authDomain: "${process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN}",
+                projectId: "${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}",
+                storageBucket: "${process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET}",
+                messagingSenderId: "${process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID}",
+                appId: "${process.env.NEXT_PUBLIC_FIREBASE_APP_ID}"
+              }
+            };
+          `
+        }} />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AuthProvider>
-          <CalProviderWrapper>
-            {children}
-          </CalProviderWrapper>
+          {children}
         </AuthProvider>
       </body>
     </html>
