@@ -3,18 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build --turbopack",
-    "start": "next start",
+    "dev": "node api.js && next dev --turbopack",
+    "build": "node api.js && next build --turbopack",
+    "start": "node api.js && next start",
     "lint": "eslint"
   },
   "dependencies": {
-    "@calcom/atoms": "^1.8.0-booker",
     "@firebase/auth": "^1.11.0",
     "@firebase/firestore": "^4.9.1",
     "@firebase/storage": "^0.14.0",
     "axios": "^1.12.1",
     "firebase": "^12.2.1",
+    "firebase-admin": "^13.5.0",
     "lucide-react": "^0.544.0",
     "next": "15.5.3",
     "react": "19.1.0",

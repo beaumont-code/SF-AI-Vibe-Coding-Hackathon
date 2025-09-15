@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
+  --background: #faf9f6;
   --foreground: #171717;
 
   /* Energizing red to yellow gradient for meeting new people */
@@ -20,7 +20,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
+    --background: #1a1918;
     --foreground: #ededed;
 
     /* Adjusted red to yellow gradients for dark mode */
@@ -50,6 +50,97 @@
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+
+.gradient-text {
+  background: var(--primary-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hover\:gradient-text:hover {
+  background: var(--primary-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Gradient border utilities for focus states */
+.gradient-border {
+  border: 2px solid transparent;
+  background: linear-gradient(white, white) padding-box,
+              var(--primary-gradient) border-box;
+}
+
+.gradient-border-focus:focus {
+  border: 2px solid transparent;
+  background: linear-gradient(white, white) padding-box,
+              var(--primary-gradient) border-box;
+  outline: none;
+}
+
+.gradient-border-focus-within {
+  position: relative;
+}
+
+.gradient-border-focus-within > * {
+  position: relative;
+  z-index: 2;
+}
+
+.gradient-border-focus-within:focus-within {
+  border-color: transparent;
+  outline: none;
+}
+
+.gradient-border-focus-within:focus-within::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: calc(0.5rem - 2px);
+  background: white;
+  z-index: 1;
+}
+
+.gradient-border-focus-within:focus-within::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--primary-gradient);
+  border-radius: 0.5rem;
+  z-index: 0;
+}
+
+/* Gradient border for buttons - uses box-shadow to preserve rounded corners */
+.gradient-border-button:focus {
+  outline: none;
+  position: relative;
+  box-shadow: 0 0 0 2px transparent;
+}
+
+.gradient-border-button:focus::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  padding: 2px;
+  background: var(--primary-gradient);
+  border-radius: inherit;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: xor;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+}
+
+/* Disable all default focus styles globally */
+input:focus,
+button:focus,
+textarea:focus,
+select:focus {
+  outline: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
 
 body {
   background: var(--background);
