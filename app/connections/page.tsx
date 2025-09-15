@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/app/contexts/AuthContext';
 import Link from 'next/link';
+import LoadingAnimation from '@/app/components/ui/LoadingAnimation';
+import { Heading, Text } from '@/app/components/ui/Typography';
 
 export default function ConnectionsPage() {
   const { user, loading } = useAuth();
@@ -34,16 +36,16 @@ export default function ConnectionsPage() {
 
   if (loading || !user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center ">
         <div className="animate-pulse">
-          <div className="w-16 h-16 gradient-icon rounded-full"></div>
+          <LoadingAnimation />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen ">
       <div className="max-w-4xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -56,13 +58,13 @@ export default function ConnectionsPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
             </button>
-            <h1 className="text-2xl font-bold text-gray-900">Your Connections</h1>
+            <Heading as="h1">Your Connections</Heading>
           </div>
         </div>
 
         {loadingConnections ? (
           <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <LoadingAnimation size="sm" />
           </div>
         ) : connections.length === 0 ? (
           // Empty state
@@ -72,12 +74,12 @@ export default function ConnectionsPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
               </svg>
             </div>
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No connections yet</h3>
-            <p className="text-gray-600 mb-6">
+            <Heading as="h3" className="mb-2">No connections yet</Heading>
+            <Text variant="subdued" className="text-gray-600 mb-6">
               Share your Cal Connect link with others to start scheduling meetings together.
-            </p>
+            </Text>
             <Link
-              href="/home"
+              href="/"
               className="inline-flex items-center px-4 py-2 gradient-primary text-white font-medium rounded-lg transition-colors"
             >
               <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
