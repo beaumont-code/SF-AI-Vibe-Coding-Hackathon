@@ -2,9 +2,13 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { getUserByUsername } from '@/app/lib/db';
+import { getUserByUsername } from '@/app/lib/firebase-db';
 import { useAuth } from '@/app/contexts/AuthContext';
-import type { User, SuggestionChip } from '@/app/types';
+import LoadingAnimation from '@/app/components/ui/LoadingAnimation';
+import { getEventTemplate } from '@/app/lib/event-templates';
+import type { User, SuggestionChip, EventTemplate } from '@/app/types';
+import { Heading, Text } from '@/app/components/ui/Typography';
+import TitleBar from '@/app/components/ui/TitleBar';
 
 interface Message {
   id: string;
@@ -18,11 +22,11 @@ interface Message {
 }
 
 const SUGGESTION_CHIPS: SuggestionChip[] = [
-  { id: '1', label: 'First 30m', intent: 'first30m', duration: 30 },
-  { id: '2', label: 'First 1h', intent: 'first1h', duration: 60 },
-  { id: '3', label: 'Morning coffee', intent: 'coffee', duration: 60, bufferBefore: 30, bufferAfter: 30, timeWindow: { start: '07:30', end: '10:30' } },
-  { id: '4', label: 'Lunch', intent: 'lunch', duration: 60, bufferBefore: 30, bufferAfter: 30, timeWindow: { start: '11:00', end: '14:00' } },
-  { id: '5', label: 'Dinner', intent: 'dinner', duration: 60, bufferBefore: 30, bufferAfter: 30, timeWindow: { start: '17:30', end: '20:30' } },
+  { id: 'chip-1', eventTemplateId: 'video-30', icon: 'video' },
+  { id: 'chip-2', eventTemplateId: 'video-60', icon: 'video' },
+  { id: 'chip-3', eventTemplateId: 'coffee-30', icon: 'coffee' },
+  { id: 'chip-4', eventTemplateId: 'lunch-60', icon: 'lunch' },
+  { id: 'chip-5', eventTemplateId: 'dinner-60', icon: 'dinner' },
 ];
 
 const SUGGESTED_PROMPTS = [
@@ -42,6 +46,8 @@ export default function SchedulePage() {
   // Suggestion chips state
   const [selectedChip, setSelectedChip] = useState<SuggestionChip | null>(null);
   const [scheduling, setScheduling] = useState(false);
+  const [suggestedTimes, setSuggestedTimes] = useState<Record<string, { start: string; end: string } | null>>({});
+  const [loadingTimes, setLoadingTimes] = useState(false);
 
   // Chat interface state
   const [showCustomChat, setShowCustomChat] = useState(false);
@@ -53,6 +59,12 @@ export default function SchedulePage() {
   useEffect(() => {
     loadTargetUser();
   }, [params.username]);
+
+  useEffect(() => {
+    if (currentUser && targetUser) {
+      fetchSuggestedTimes();
+    }
+  }, [currentUser, targetUser]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -77,31 +89,103 @@ export default function SchedulePage() {
     }
   };
 
+  const fetchSuggestedTimes = async () => {
+    if (!currentUser || !targetUser) return;
+
+    // Debug: Log Cal.com schedule information for both users
+    console.log('=== CAL.COM SCHEDULE DEBUG ===');
+    console.log('Current user:', {
+      id: currentUser.id,
+      email: currentUser.email,
+      calcomIntegrationId: currentUser.calcomIntegrationId,
+      calcomScheduleId: currentUser.calcomScheduleId,
+      timezone: currentUser.timezone
+    });
+    console.log('Target user:', {
+      id: targetUser.id,
+      email: targetUser.email,
+      calcomIntegrationId: targetUser.calcomIntegrationId,
+      calcomScheduleId: targetUser.calcomScheduleId,
+      timezone: targetUser.timezone
+    });
+
+    // Check if both users have Cal.com managed IDs (needed for mutual availability)
+    const hasBothCalcomIds = currentUser.calcomIntegrationId && targetUser.calcomIntegrationId;
+    console.log('Both users have Cal.com integration IDs:', hasBothCalcomIds);
+
+    if (hasBothCalcomIds) {
+      console.log('✅ Should use Cal.com API for availability');
+    } else {
+      console.log('❌ Will fallback to local calendar system');
+    }
+    console.log('===============================');
+
+    setLoadingTimes(true);
+    const times: Record<string, { start: string; end: string } | null> = {};
+
+    try {
+      // Fetch suggested times for each chip
+      for (const chip of SUGGESTION_CHIPS) {
+        const eventTemplate = getEventTemplate(chip.eventTemplateId);
+        if (!eventTemplate) continue;
+
+        try {
+          const response = await fetch('/api/suggested-times', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user1Id: currentUser.id,
+              user2Id: targetUser.id,
+              intent: eventTemplate.intent,
+              eventTemplateId: chip.eventTemplateId,
+            }),
+          });
+
+          const data = await response.json();
+          times[chip.id] = data.slot || null;
+        } catch (error) {
+          console.error(`Error fetching time for ${eventTemplate.intent}:`, error);
+          times[chip.id] = null;
+        }
+      }
+    } finally {
+      setSuggestedTimes(times);
+      setLoadingTimes(false);
+    }
+  };
+
   const handleChipClick = async (chip: SuggestionChip) => {
     if (!currentUser || !targetUser) return;
+
+    const eventTemplate = getEventTemplate(chip.eventTemplateId);
+    if (!eventTemplate) return;
 
     setSelectedChip(chip);
     setScheduling(true);
 
     try {
-      const response = await fetch('/api/availability/suggestions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user1Id: currentUser.id,
-          user2Id: targetUser.id,
-          intent: chip.intent,
-          duration: chip.duration,
-          bufferBefore: chip.bufferBefore,
-          bufferAfter: chip.bufferAfter,
-          timeWindow: chip.timeWindow,
-        }),
-      });
+      // Use pre-fetched time if available, otherwise fetch new one
+      const existingTime = suggestedTimes[chip.id];
+      let slot = existingTime;
 
-      const data = await response.json();
+      if (!slot) {
+        const response = await fetch('/api/suggested-times', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user1Id: currentUser.id,
+            user2Id: targetUser.id,
+            intent: eventTemplate.intent,
+            eventTemplateId: chip.eventTemplateId,
+          }),
+        });
 
-      if (data.slot) {
-        openCalendarCompose(data.slot, chip, targetUser);
+        const data = await response.json();
+        slot = data.slot;
+      }
+
+      if (slot) {
+        openCalendarCompose(slot, eventTemplate, targetUser);
       } else {
         alert('No available time slots found in the next 14 days');
       }
@@ -114,9 +198,9 @@ export default function SchedulePage() {
     }
   };
 
-  const openCalendarCompose = (slot: any, chip: SuggestionChip, otherUser: User) => {
-    const eventName = getEventName(chip.intent, otherUser.displayName);
-    const eventDescription = getEventDescription(chip.intent, otherUser.displayName);
+  const openCalendarCompose = (slot: any, eventTemplate: EventTemplate, otherUser: User) => {
+    const eventName = getEventName(eventTemplate.intent, otherUser.displayName);
+    const eventDescription = getEventDescription(eventTemplate.intent, otherUser.displayName);
 
     const startDate = new Date(slot.start);
     const endDate = new Date(slot.end);
@@ -161,7 +245,7 @@ export default function SchedulePage() {
     setIsProcessing(true);
 
     try {
-      const response = await fetch('/api/availability/freeform', {
+      const response = await fetch('/api/custom-ai-times', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -230,6 +314,37 @@ export default function SchedulePage() {
     return `${start.toLocaleDateString('en-US', dateOptions)} ${start.toLocaleTimeString('en-US', timeOptions)} - ${end.toLocaleTimeString('en-US', timeOptions)}`;
   };
 
+  const formatChipSubtitle = (chip: SuggestionChip) => {
+    if (loadingTimes) {
+      return 'Finding times...';
+    }
+
+    const eventTemplate = getEventTemplate(chip.eventTemplateId);
+    if (!eventTemplate) return 'Next available time';
+
+    const suggestedTime = suggestedTimes[chip.id];
+    if (suggestedTime) {
+      const start = new Date(suggestedTime.start);
+      const end = new Date(suggestedTime.end);
+      const timeOptions: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
+      const timeRange = `${start.toLocaleTimeString('en-US', timeOptions)} - ${end.toLocaleTimeString('en-US', timeOptions)}`;
+
+      // Add travel buffer notation for in-person events
+      if (eventTemplate.travelBuffer) {
+        const totalBuffer = eventTemplate.travelBuffer.beforeMinutes + eventTemplate.travelBuffer.afterMinutes;
+        return `${timeRange} • ${totalBuffer} min travel buffer`;
+      }
+
+      return timeRange;
+    }
+
+    if (eventTemplate.preferredTimeWindow) {
+      return `${eventTemplate.preferredTimeWindow.start} - ${eventTemplate.preferredTimeWindow.end}`;
+    }
+
+    return 'Next available time';
+  };
+
   const getEventName = (intent: string, otherPersonName: string): string => {
     switch (intent) {
       case 'coffee':
@@ -260,11 +375,56 @@ export default function SchedulePage() {
     }
   };
 
+  const getChipIcon = (icon: string) => {
+    switch (icon) {
+      case 'video':
+        return (
+          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+        );
+      case 'coffee':
+        return (
+          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18V7a1 1 0 011-1h8a1 1 0 011 1v11" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 10h2a2 2 0 012 2v2a2 2 0 01-2 2h-2" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18h10M8 3v3M12 3v3M16 3v3" />
+          </svg>
+        );
+      case 'lunch':
+        return (
+          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 8c0-1.5 1.5-3 4-3h4c2.5 0 4 1.5 4 3v1H6V8z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 9h14v2a1 1 0 01-1 1H6a1 1 0 01-1-1V9z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 12h12v2a1 1 0 01-1 1H7a1 1 0 01-1-1v-2z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 15h10v2a2 2 0 01-2 2H9a2 2 0 01-2-2v-2z" />
+          </svg>
+        );
+      case 'dinner':
+        return (
+          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v2" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6h4" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 14c0-3.314 2.686-6 6-6s6 2.686 6 6" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 14h16" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18h12" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14v4M16 14v4" />
+          </svg>
+        );
+      default:
+        return (
+          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        );
+    }
+  };
+
   if (loading || !targetUser) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="animate-pulse">
-          <div className="w-16 h-16 gradient-icon rounded-full"></div>
+          <LoadingAnimation />
         </div>
       </div>
     );
@@ -285,8 +445,8 @@ export default function SchedulePage() {
               </svg>
             </button>
             <div className="flex-1">
-              <h1 className="font-semibold text-gray-900">Find a custom time</h1>
-              <p className="text-sm text-gray-500">with {targetUser.displayName}</p>
+              <Heading as="h1" className="font-semibold text-gray-900">Find a custom time</Heading>
+              <Text variant="subdued" className="text-gray-500">with {targetUser.displayName}</Text>
             </div>
           </div>
         </div>
@@ -302,7 +462,7 @@ export default function SchedulePage() {
                 <div
                   className={`max-w-[80%] rounded-lg p-3 ${
                     message.type === 'user'
-                      ? 'bg-blue-600 text-white'
+                      ? 'gradient-primary text-white'
                       : 'bg-white border border-gray-200'
                   }`}
                 >
@@ -318,9 +478,9 @@ export default function SchedulePage() {
                           onClick={() => handleScheduleSlot(slot)}
                           className="w-full p-3 bg-gray-50 hover:bg-gray-100 rounded-lg text-left transition-colors"
                         >
-                          <p className="font-medium text-gray-900">
+                          <Text variant="base">
                             {slot.label || formatSlotTime(slot)}
-                          </p>
+                          </Text>
                           <p className="text-sm gradient-link mt-1">Schedule →</p>
                         </button>
                       ))}
@@ -355,9 +515,9 @@ export default function SchedulePage() {
                   <button
                     key={prompt}
                     onClick={() => handlePromptChip(prompt)}
-                    className="flex-shrink-0 px-3 py-2 bg-white border border-gray-200 rounded-full text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                    className="flex-shrink-0 px-3 py-2 bg-white border border-gray-200 rounded-full hover:bg-gray-50 transition-colors"
                   >
-                    {prompt}
+                    <Text variant="small">{prompt}</Text>
                   </button>
                 ))}
               </div>
@@ -374,7 +534,7 @@ export default function SchedulePage() {
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSend()}
               placeholder="Describe when you'd like to meet..."
-              className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-blue-500"
+              className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-orange-500"
               disabled={isProcessing}
             />
             <button
@@ -395,87 +555,53 @@ export default function SchedulePage() {
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-8">
       <div className="max-w-md mx-auto">
-        {/* Header */}
-        <button
-          onClick={() => router.back()}
-          className="mb-6 flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-          Back
-        </button>
+        <TitleBar title="Schedule" onBack={() => router.back()} />
 
-        {/* Target User Info */}
-        <div className="bg-white rounded-xl shadow-sm p-4 mb-6 flex items-center gap-3">
-          {targetUser.photoURL ? (
-            <img
-              src={targetUser.photoURL}
-              alt={targetUser.displayName}
-              className="w-12 h-12 rounded-full"
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.style.display = 'none';
-                if (target.nextElementSibling) {
-                  (target.nextElementSibling as HTMLElement).style.display = 'flex';
-                }
-              }}
-            />
-          ) : null}
-          <div
-            className="w-12 h-12 rounded-full gradient-icon flex items-center justify-center text-white font-semibold"
-            style={{ display: targetUser.photoURL ? 'none' : 'flex' }}
-          >
-            {targetUser.displayName?.[0] || 'U'}
-          </div>
-          <div>
-            <p className="font-semibold text-gray-900">{targetUser.displayName}</p>
-            <p className="text-sm text-gray-500">@{targetUser.username}</p>
-          </div>
-        </div>
 
         {/* Suggestions */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Pick a suggested time</h2>
-
-          <div className="space-y-3">
-            {SUGGESTION_CHIPS.map((chip) => (
-              <button
-                key={chip.id}
-                onClick={() => handleChipClick(chip)}
-                disabled={scheduling}
-                className={`w-full p-4 rounded-lg border-2 transition-all ${
-                  selectedChip?.id === chip.id
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
-                } disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-gray-900">{chip.label}</span>
-                  {selectedChip?.id === chip.id && scheduling && (
-                    <svg className="animate-spin h-5 w-5 text-blue-600" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                  )}
+        <div className="space-y-3 mb-6">
+          {SUGGESTION_CHIPS.map((chip) => (
+            <button
+              key={chip.id}
+              onClick={() => handleChipClick(chip)}
+              disabled={scheduling}
+              className={`w-full p-4 rounded-lg bg-white border-2 transition-all duration-200 ${
+                selectedChip?.id === chip.id
+                  ? 'border-orange-500 bg-orange-50 shadow-lg ring-2 ring-red-100'
+                  : 'border-gray-200 hover:border-transparent hover:bg-gradient-to-r hover:from-red-50 hover:to-amber-50 hover:shadow-lg hover:ring-2 hover:ring-red-100'
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-gray-100">
+                  {getChipIcon(chip.icon || 'default')}
                 </div>
-                {chip.timeWindow && (
-                  <span className="text-sm text-gray-500 mt-1">
-                    {chip.timeWindow.start} - {chip.timeWindow.end}
-                  </span>
+                <div className="flex-1 text-left">
+                  <Text variant="base">
+                    {(() => {
+                      const eventTemplate = getEventTemplate(chip.eventTemplateId);
+                      return eventTemplate ? `${eventTemplate.title} (${eventTemplate.duration} min)` : 'Unknown Event';
+                    })()}
+                  </Text>
+                  <Text variant="subdued">
+                    {formatChipSubtitle(chip)}
+                  </Text>
+                </div>
+                {selectedChip?.id === chip.id && scheduling && (
+                  <LoadingAnimation size="sm" />
                 )}
-              </button>
-            ))}
-          </div>
+              </div>
+            </button>
+          ))}
         </div>
 
         {/* Custom Time Button */}
         <button
           onClick={handleCustomChatToggle}
-          className="w-full py-3 px-4 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors"
+          className="w-full py-3 px-4 gradient-primary text-white font-medium rounded-lg transition-colors"
         >
-          Find custom time
+          Find Custom Time
         </button>
+
       </div>
     </div>
   );

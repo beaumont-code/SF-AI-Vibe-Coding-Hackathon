@@ -17,6 +17,14 @@ const nextConfig: NextConfig = {
         ]
       }
     ];
+  },
+  async rewrites() {
+    return [
+      {
+        source: '/__/firebase/:path*',
+        destination: '/api/not-found',
+      }
+    ];
   }
 };
 
